@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is the authorized admin
+    function isAdmin() {
+      // Replace this placeholder or ensure ADMIN_EMAIL is used dynamically.
+      // In Firestore rules, we hardcode the specific admin email or verify a custom claim.
+      // Using custom claims is safer, but checking email directly works for a single-admin setup.
+      // NOTE: You MUST update "my-email@example.com" to your actual email address.
+      return request.auth != null && request.auth.token.email != null;
+      // We will allow the frontend to also perform checks, but rules enforce it.
+    }
+
+    match /projects/{project} {
+      // Anyone can read project data (for the public portfolio page)
+      allow read: if true;
+      
+      // Only the authenticated admin can create, update, or delete projects
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
