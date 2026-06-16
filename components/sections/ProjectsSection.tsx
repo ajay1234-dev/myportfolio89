@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import { projects as staticProjects } from '@/data/projects';
 import ProjectMockup from '@/components/ProjectMockup';
 import { db } from '@/lib/firebase';
@@ -14,12 +13,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
  */
 const ProjectCard = ({ project, index }: { project: any, index: number }) => {
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9, y: 40 }}
-      whileInView={{ opacity: 1, scale: 1, y: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
-      transition={{ type: "spring", stiffness: 260, damping: 20, delay: index * 0.1 }}
-      whileHover={{ scale: 1.02, y: -8 }}
+    <div
       className="project-unified-card"
       style={{
         background: 'rgba(12, 13, 18, 0.6)',
@@ -28,6 +22,7 @@ const ProjectCard = ({ project, index }: { project: any, index: number }) => {
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
+        transition: 'transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease',
       }}
     >
       {/* Top: Mockup Area */}
@@ -91,7 +86,7 @@ const ProjectCard = ({ project, index }: { project: any, index: number }) => {
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -172,9 +167,16 @@ export default function ProjectsSection() {
       </div>
 
       <style dangerouslySetInnerHTML={{__html:`
-        .hover-btn-dark:hover { background: rgba(242,244,255,0.08) !important; border-color: rgba(242,244,255,0.15) !important; }
+        .project-unified-card:hover { 
+          transform: translateY(-8px) scale(1.01); 
+          box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 20px rgba(91,110,255,0.1); 
+          border-color: rgba(242,244,255,0.15) !important; 
+        }
+        .project-unified-card .hover-btn-dark:hover {
+          background: rgba(242,244,255,0.1) !important;
+          color: #fff !important;
+        }
         .hover-btn-color:hover { filter: brightness(1.15); }
-        .project-unified-card:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.5); border-color: rgba(242,244,255,0.12) !important; }
         
         @media (max-width: 768px) {
           .project-unified-card {
