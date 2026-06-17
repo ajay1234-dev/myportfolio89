@@ -24,36 +24,56 @@ export default function DeploymentsPage() {
   const [refreshMsg, setRefreshMsg] = useState("");
 
   useEffect(() => {
-    const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snap) => {
+    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
       setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Project)));
       setLoading(false);
     });
+    return unsub;
   }, []);
 
-  const handleRefresh = async () => {
+  // Auto-sync with GitHub whenever the page is opened
+  useEffect(() => {
+    // Small delay to ensure auth is ready
+    const timer = setTimeout(() => syncWithGitHub(false), 1500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  const syncWithGitHub = async (showMsg = true) => {
     try {
       setRefreshing(true);
-      setRefreshMsg("Checking GitHub for URL updates...");
+      if (showMsg) setRefreshMsg('Syncing with GitHub...');
       const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
+      if (!token) throw new Error('Not authenticated');
 
-      const res = await fetch("/api/sync/deployments", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+      const res = await fetch('/api/sync/deployments', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      
-      setRefreshMsg(data.updatedCount === 0 
-        ? "✓ All deployment URLs are up to date." 
-        : `✓ Updated ${data.updatedCount} deployment URLs!`);
+
+      const parts = [];
+      if (data.updatedCount > 0) parts.push(`Updated ${data.updatedCount} URL(s)`);
+      if (data.deletedCount > 0) parts.push(`Removed ${data.deletedCount} deleted repo(s)`);
+      if (showMsg) {
+        setRefreshMsg(
+          parts.length > 0
+            ? `✓ ${parts.join(' · ')}`
+            : '✓ Everything is up to date.'
+        );
+      }
     } catch (err: any) {
-      setRefreshMsg(`✕ ${err.message}`);
+      if (showMsg) setRefreshMsg(`✕ ${err.message}`);
     } finally {
       setRefreshing(false);
     }
   };
+
+  const handleRefresh = () => syncWithGitHub(true);
+
 
   // Deployed = has a live URL
   const deployed = projects.filter((p) => p.liveUrl && p.liveUrl.trim() !== "");
