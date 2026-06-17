@@ -1,7 +1,9 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
+import { db } from '@/lib/firebase'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
 
 const fadeUp = {
   hidden: { opacity: 0, y: 40 },
@@ -21,6 +23,29 @@ export default function AboutSection() {
     once: true, 
     margin: '-100px' 
   })
+
+  const [projectCount, setProjectCount] = useState<number | string>('...');
+  const [repoCount, setRepoCount] = useState<number | string>('...');
+
+  useEffect(() => {
+    // 1. Fetch live projects count from Firestore
+    const q = query(collection(db, 'projects'), where('status', '==', 'approved'));
+    const unsub = onSnapshot(q, (snap) => {
+      setProjectCount(snap.docs.length);
+    });
+
+    // 2. Fetch public repo count from GitHub API (ajay1234-dev)
+    fetch('https://api.github.com/users/ajay1234-dev')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.public_repos !== undefined) {
+          setRepoCount(data.public_repos);
+        }
+      })
+      .catch((err) => console.error('Failed to fetch github stats', err));
+
+    return () => unsub();
+  }, []);
 
   return (
     <section
@@ -90,8 +115,8 @@ export default function AboutSection() {
           }}>
             {[
               { value: '3+', label: 'Years' },
-              { value: '8',  label: 'Projects' },
-              { value: '12', label: 'Regions' }
+              { value: projectCount,  label: 'Projects' },
+              { value: repoCount, label: 'Repositories' }
             ].map((stat, i) => (
               <motion.div
                 key={stat.label}
