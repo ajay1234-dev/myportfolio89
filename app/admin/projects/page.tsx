@@ -41,6 +41,7 @@ export default function ProjectsPage() {
   
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
+  const [capturingRow, setCapturingRow] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
@@ -206,6 +207,47 @@ export default function ProjectsPage() {
       alert(`✕ ${err.message}`);
     } finally {
       setCapturingScreenshot(false);
+    }
+  };
+
+  const handleCaptureScreenshotRow = async (project: Project) => {
+    const targetUrl = project.liveUrl || project.githubUrl;
+    if (!targetUrl) {
+      alert("No URL available to capture.");
+      return;
+    }
+    try {
+      setCapturingRow(project.id);
+      setActionMsg(`Capturing screenshot for "${project.title}"... (Takes ~5-8s)`);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch("/api/screenshot", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: targetUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to capture");
+      
+      // Save directly to Firestore
+      await fetch("/api/projects", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id: project.id, imageUrl: data.imageUrl }),
+      });
+
+      setActionMsg(`✓ Screenshot captured and saved for "${project.title}"!`);
+    } catch (err: any) {
+      setActionMsg(`✕ ${err.message}`);
+    } finally {
+      setCapturingRow(null);
     }
   };
 
@@ -383,31 +425,59 @@ export default function ProjectsPage() {
               {/* Action buttons */}
               <div style={{ display: "flex", gap: "8px", marginTop: "14px", flexWrap: "wrap" }}>
                 {activeTab === "imported" && (
-                  <button
-                    onClick={() => handleGenerateAndPublish(project)}
-                    disabled={generating === project.id}
-                    style={{
-                      padding: "7px 14px", borderRadius: "8px", border: "none",
-                      background: generating === project.id ? "rgba(242,244,255,0.08)" : "linear-gradient(135deg, #5B6EFF, #7B8FFF)",
-                      color: "#fff", fontSize: "11px", fontWeight: 700,
-                      fontFamily: "var(--font-dm)", cursor: generating === project.id ? "not-allowed" : "pointer",
-                      opacity: generating === project.id ? 0.6 : 1,
-                      boxShadow: generating === project.id ? "none" : "0 0 16px rgba(91,110,255,0.3)",
-                      display: "flex", alignItems: "center", gap: "6px",
-                    }}
-                  >
-                    {generating === project.id ? (
-                      <><div style={{ width: "10px", height: "10px", border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid #fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Generating...</>
-                    ) : (
-                      <>✨ Generate AI Content</>
-                    )}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleGenerateAndPublish(project)}
+                      disabled={generating === project.id || capturingRow === project.id}
+                      style={{
+                        padding: "7px 14px", borderRadius: "8px", border: "none",
+                        background: generating === project.id ? "rgba(242,244,255,0.08)" : "linear-gradient(135deg, #5B6EFF, #7B8FFF)",
+                        color: "#fff", fontSize: "11px", fontWeight: 700,
+                        fontFamily: "var(--font-dm)", cursor: (generating === project.id || capturingRow === project.id) ? "not-allowed" : "pointer",
+                        opacity: (generating === project.id || capturingRow === project.id) ? 0.6 : 1,
+                        boxShadow: generating === project.id ? "none" : "0 0 16px rgba(91,110,255,0.3)",
+                        display: "flex", alignItems: "center", gap: "6px",
+                      }}
+                    >
+                      {generating === project.id ? (
+                        <><div style={{ width: "10px", height: "10px", border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid #fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Generating...</>
+                      ) : (
+                        <>✨ Generate AI Content</>
+                      )}
+                    </button>
+                    
+                    <button
+                      onClick={() => handleCaptureScreenshotRow(project)}
+                      disabled={capturingRow === project.id || generating === project.id}
+                      style={{
+                        padding: "7px 14px", borderRadius: "8px", border: "1px solid rgba(0,229,160,0.4)",
+                        background: capturingRow === project.id ? "rgba(0,229,160,0.05)" : "rgba(0,229,160,0.1)",
+                        color: "#00E5A0", fontSize: "11px", fontWeight: 700,
+                        fontFamily: "var(--font-dm)", cursor: (capturingRow === project.id || generating === project.id) ? "not-allowed" : "pointer",
+                        opacity: (capturingRow === project.id || generating === project.id) ? 0.6 : 1,
+                        display: "flex", alignItems: "center", gap: "6px",
+                      }}
+                    >
+                      {capturingRow === project.id ? "Capturing..." : "📷 Capture Screenshot"}
+                    </button>
+                  </>
                 )}
 
                 {activeTab === "pending" && (
                   <>
                     <button onClick={() => openEditModal(project)} style={{ padding: "7px 14px", borderRadius: "8px", border: "none", background: "rgba(0,229,160,0.15)", color: "#00E5A0", fontSize: "11px", fontWeight: 700, fontFamily: "var(--font-dm)", cursor: "pointer" }}>
                       ✓ Review & Publish
+                    </button>
+                    <button
+                      onClick={() => handleCaptureScreenshotRow(project)}
+                      disabled={capturingRow === project.id}
+                      style={{
+                        padding: "7px 14px", borderRadius: "8px", border: "none",
+                        background: "rgba(91,110,255,0.1)", color: "#7B8FFF", fontSize: "11px", fontWeight: 700, fontFamily: "var(--font-dm)", 
+                        cursor: capturingRow === project.id ? "not-allowed" : "pointer", opacity: capturingRow === project.id ? 0.6 : 1
+                      }}
+                    >
+                      {capturingRow === project.id ? "Capturing..." : "📷 Retake Screenshot"}
                     </button>
                     <button onClick={() => handleStatusChange(project.id, "rejected")} style={{ padding: "7px 14px", borderRadius: "8px", border: "none", background: "rgba(255,77,109,0.1)", color: "#FF4D6D", fontSize: "11px", fontWeight: 700, fontFamily: "var(--font-dm)", cursor: "pointer" }}>
                       ✕ Reject

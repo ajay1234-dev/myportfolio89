@@ -47,9 +47,34 @@ export async function captureScreenshot(url: string): Promise<string> {
   const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
   console.log(`[Screenshot] Capturing: ${url}`);
 
-  // ── STRATEGY 1: thum.io ────────────────────────────────────────────────────
-  // Fast (2-3s), no API key, works in all environments.
-  // maxAge/0 forces a fresh capture every time (bypasses cache).
+  // ── STRATEGY 1: microlink.io (WITH DELAY) ──────────────────────────────────
+  // Now that this runs in a separate 10s budget, we can afford a 5-second delay!
+  if (!isLocalhost) {
+    try {
+      // waitFor=5000 means wait 5 seconds before capturing
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle0&waitFor=5000&force=true`;
+      console.log(`[Screenshot] Trying microlink.io with 5s delay...`);
+
+      const res = await fetch(microlinkApi, { signal: AbortSignal.timeout(9000) });
+
+      if (res.ok) {
+        const data = await res.json() as any;
+        const screenshotUrl: string | undefined = data?.data?.screenshot?.url;
+        if (screenshotUrl) {
+          const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
+          console.log(`[Screenshot] ✓ microlink.io → Cloudinary: ${cloudUrl}`);
+          return cloudUrl;
+        }
+        console.warn('[Screenshot] microlink.io: no screenshot URL in response');
+      } else {
+        console.warn(`[Screenshot] microlink.io HTTP ${res.status}`);
+      }
+    } catch (e: any) {
+      console.warn('[Screenshot] microlink.io failed:', e.message);
+    }
+  }
+
+  // ── STRATEGY 2: thum.io (NO DELAY FALLBACK) ────────────────────────────────
   if (!isLocalhost) {
     try {
       const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/maxAge/0/${url}`;
@@ -73,33 +98,6 @@ export async function captureScreenshot(url: string): Promise<string> {
       }
     } catch (e: any) {
       console.warn('[Screenshot] thum.io failed:', e.message);
-    }
-  }
-
-  // ── STRATEGY 2: microlink.io ───────────────────────────────────────────────
-  // Slightly slower but more reliable for SPAs.
-  // No waitFor delay here — we need speed to stay within 10s Vercel limit.
-  if (!isLocalhost) {
-    try {
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle0&force=true`;
-      console.log(`[Screenshot] Trying microlink.io...`);
-
-      const res = await fetch(microlinkApi, { signal: AbortSignal.timeout(8000) });
-
-      if (res.ok) {
-        const data = await res.json() as any;
-        const screenshotUrl: string | undefined = data?.data?.screenshot?.url;
-        if (screenshotUrl) {
-          const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
-          console.log(`[Screenshot] ✓ microlink.io → Cloudinary: ${cloudUrl}`);
-          return cloudUrl;
-        }
-        console.warn('[Screenshot] microlink.io: no screenshot URL in response');
-      } else {
-        console.warn(`[Screenshot] microlink.io HTTP ${res.status}`);
-      }
-    } catch (e: any) {
-      console.warn('[Screenshot] microlink.io failed:', e.message);
     }
   }
 

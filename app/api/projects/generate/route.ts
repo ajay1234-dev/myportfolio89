@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { fetchGithubRepo } from '@/lib/github';
 import { generateProjectDescription } from '@/lib/ai';
-import { captureScreenshot } from '@/lib/screenshot';
 
 export const maxDuration = 60; // Works on Pro; on free plan functions are limited to 10s
 
@@ -44,15 +43,11 @@ export async function POST(req: Request) {
     console.log(`[Generate] Fetching repo: ${owner}/${repoName}`);
     const repoDetails = await fetchGithubRepo(owner, repoName);
 
-    // Step 2: Run AI description AND screenshot capture IN PARALLEL
-    // This saves 3-5 seconds vs running them sequentially
-    console.log(`[Generate] Running AI + screenshot in parallel...`);
-    const [aiContent, screenshotUrl] = await Promise.all([
-      generateProjectDescription(repoDetails),
-      captureScreenshot(screenshotTarget),
-    ]);
+    // Step 2: Run AI description
+    console.log(`[Generate] Running AI generation...`);
+    const aiContent = await generateProjectDescription(repoDetails);
 
-    console.log(`[Generate] AI done. Screenshot: ${screenshotUrl || 'NONE'}`);
+    console.log(`[Generate] AI done.`);
 
     // Step 3: Build update object
     const update: Record<string, unknown> = {
@@ -64,12 +59,7 @@ export async function POST(req: Request) {
       updatedAt: new Date().toISOString(),
     };
 
-    if (screenshotUrl) {
-      update.imageUrl = screenshotUrl;
-      console.log('[Generate] ✓ imageUrl saved:', screenshotUrl);
-    } else {
-      console.warn('[Generate] No screenshot — keeping existing imageUrl');
-    }
+
 
     // Step 4: Save to Firestore
     await projectRef.update(update);
