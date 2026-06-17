@@ -82,10 +82,10 @@ export async function captureScreenshot(url: string): Promise<string> {
   // ─────────────────────────────────────────────────────────────────────────────
   if (!isLocalhost) {
     try {
-      // waitUntil=networkidle2 waits for no network requests for 500ms
-      // waitFor=5000 adds an EXTRA 5 second delay on top, so GSAP/CSS animations
-      // and canvas-based content have fully rendered before the screenshot is taken
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2&waitFor=5000`;
+      // force=true bypasses microlink.io's cache so it always takes a FRESH screenshot
+      // waitUntil=networkidle2 waits for network to settle
+      // waitFor=5000 adds 5 extra seconds for GSAP/CSS animations to fully play
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2&waitFor=5000&force=true`;
       console.log(`[Screenshot] Strategy 1 — microlink.io (networkidle2): ${microlinkApi}`);
 
       const res = await fetch(microlinkApi, {
@@ -122,7 +122,8 @@ export async function captureScreenshot(url: string): Promise<string> {
   // ─────────────────────────────────────────────────────────────────────────────
   if (!isLocalhost) {
     try {
-      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/${url}`;
+      // maxAge/0/ forces thum.io to always take a fresh screenshot (bypass cache)
+      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/maxAge/0/${url}`;
       console.log(`[Screenshot] Strategy 2 — thum.io: ${thumUrl}`);
 
       const res = await fetch(thumUrl, {
