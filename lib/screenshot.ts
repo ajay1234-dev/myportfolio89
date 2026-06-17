@@ -48,14 +48,15 @@ export async function captureScreenshot(url: string): Promise<string> {
   console.log(`[Screenshot] Capturing: ${url}`);
 
   // ── STRATEGY 1: microlink.io (WITH DELAY) ──────────────────────────────────
-  // Now that this runs in a separate 10s budget, we can afford a 5-second delay!
+  // Now that this runs in a separate budget, we can afford a 10-second delay!
   if (!isLocalhost) {
     try {
-      // waitFor=5000 means wait 5 seconds before capturing
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle0&waitFor=5000&force=true`;
-      console.log(`[Screenshot] Trying microlink.io with 5s delay...`);
+      // waitFor=10000 means wait 10 seconds before capturing
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle0&waitFor=10000&force=true`;
+      console.log(`[Screenshot] Trying microlink.io with 10s delay...`);
 
-      const res = await fetch(microlinkApi, { signal: AbortSignal.timeout(9000) });
+      // 25s timeout to allow 10s wait + rendering + downloading
+      const res = await fetch(microlinkApi, { signal: AbortSignal.timeout(25000) });
 
       if (res.ok) {
         const data = await res.json() as any;

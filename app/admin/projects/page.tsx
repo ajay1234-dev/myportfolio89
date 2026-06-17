@@ -218,7 +218,7 @@ export default function ProjectsPage() {
     }
     try {
       setCapturingRow(project.id);
-      setActionMsg(`Capturing screenshot for "${project.title}"... (Takes ~5-8s)`);
+      setActionMsg(`Capturing screenshot for "${project.title}"... (Takes ~10-15s)`);
       const token = await auth.currentUser?.getIdToken();
       if (!token) throw new Error("Not authenticated");
 
