@@ -70,7 +70,7 @@ export default function ProjectsPage() {
       try { data = JSON.parse(text); } catch {}
 
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-      setActionMsg(`✓ "${data.title}" generated successfully! Moved to Pending Review.`);
+      setActionMsg(`✓ "${data.title}" AI content saved! 📸 Screenshot is processing in background — check back in ~30 seconds then refresh.`);
     } catch (err: any) {
       setActionMsg(`✕ ${err.message}`);
     } finally {

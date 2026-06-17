@@ -4,10 +4,8 @@ import { fetchGithubRepo } from '@/lib/github';
 import { generateProjectDescription } from '@/lib/ai';
 import { captureScreenshot } from '@/lib/screenshot';
 
-// Tell Vercel to allow this serverless function up to 60 seconds
-// (default is 10s which is too short for screenshot capture + Cloudinary upload)
+// Vercel Pro: 60s. Free: 10s (we work around this with fire-and-forget screenshots)
 export const maxDuration = 60;
-
 
 // Helper to parse Firebase ID token and verify admin email
 function verifyAdmin(req: Request) {
@@ -19,6 +17,25 @@ function verifyAdmin(req: Request) {
     return payload.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Runs the screenshot capture and Cloudinary upload in the background,
+ * then updates Firestore when done. This does NOT block the main response.
+ */
+async function runScreenshotInBackground(projectRef: FirebaseFirestore.DocumentReference, url: string) {
+  try {
+    console.log(`[Screenshot BG] Starting background capture for: ${url}`);
+    const screenshotUrl = await captureScreenshot(url);
+    if (screenshotUrl) {
+      await projectRef.update({ imageUrl: screenshotUrl, updatedAt: new Date().toISOString() });
+      console.log(`[Screenshot BG] ✓ Updated Firestore with: ${screenshotUrl}`);
+    } else {
+      console.warn('[Screenshot BG] No screenshot URL returned.');
+    }
+  } catch (err) {
+    console.error('[Screenshot BG] Failed:', err);
   }
 }
 
@@ -53,41 +70,43 @@ export async function POST(req: Request) {
 
     const [, owner, repoName] = match;
 
-    // 3. Fetch deep repo details (README, languages, topics)
+    // 3. Fetch repo details (README, languages, topics)
     console.log(`[Generate] Fetching details for ${owner}/${repoName}...`);
     const repoDetails = await fetchGithubRepo(owner, repoName);
 
-    // 4. Generate AI description via Gemini
-    console.log(`[Generate] Running Gemini AI analysis...`);
+    // 4. Generate AI description
+    console.log(`[Generate] Running AI analysis...`);
     const aiContent = await generateProjectDescription(repoDetails);
 
-    // 5. Capture screenshot and upload to Cloudinary
-    const screenshotTarget = project.liveUrl || project.githubUrl;
-    console.log(`[Generate] Capturing screenshot for: ${screenshotTarget}`);
-    const screenshotUrl = await captureScreenshot(screenshotTarget);
-    console.log(`[Generate] Screenshot URL result: ${screenshotUrl || 'EMPTY - no image captured'}`);
-
-    // 6. Update project in Firestore
+    // 5. Save AI content to Firestore immediately (fast — doesn't wait for screenshot)
     const update: Record<string, unknown> = {
       title: aiContent.title || project.title,
       description: aiContent.description || project.description,
       features: aiContent.features || project.features,
       techStack: aiContent.techStack || repoDetails.languages || project.techStack,
-      status: 'pending', // Move to pending review after generation
+      status: 'pending',
       updatedAt: new Date().toISOString(),
     };
 
-    // Only overwrite imageUrl if we actually got a new one
-    if (screenshotUrl) {
-      update.imageUrl = screenshotUrl;
-      console.log('[Generate] imageUrl saved to Firestore:', screenshotUrl);
-    } else {
-      console.warn('[Generate] No screenshot captured — keeping existing imageUrl:', project.imageUrl || 'none');
-    }
-
     await projectRef.update(update);
+    console.log('[Generate] ✓ AI content saved to Firestore.');
 
-    return NextResponse.json({ success: true, ...update, imageUrl: update.imageUrl || project.imageUrl });
+    // 6. Fire screenshot capture in background — does NOT block this response
+    // It will update imageUrl in Firestore when ready (takes 10-30 seconds)
+    const screenshotTarget = project.liveUrl || project.githubUrl;
+    console.log(`[Generate] 🔄 Starting background screenshot for: ${screenshotTarget}`);
+    
+    // Use void to explicitly not await — fire and forget
+    void runScreenshotInBackground(projectRef, screenshotTarget);
+
+    // 7. Return success immediately — screenshot will update separately
+    return NextResponse.json({
+      success: true,
+      ...update,
+      imageUrl: project.imageUrl || null,
+      screenshotStatus: 'processing', // tells the client screenshot is in progress
+    });
+
   } catch (error: any) {
     console.error('Generate API Error:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
