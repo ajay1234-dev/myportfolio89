@@ -6,50 +6,26 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-/**
- * Asks Cloudinary to fetch and store a remote image URL.
- * Cloudinary downloads it directly from its own servers — no buffer transfer through our API.
- * This is the most reliable approach for production/serverless environments.
- */
-async function uploadRemoteUrlToCloudinary(
-  imageUrl: string,
-  folder = 'portfolio_projects'
-): Promise<string> {
+async function uploadRemoteUrlToCloudinary(imageUrl: string, folder = 'portfolio_projects'): Promise<string> {
   return new Promise((resolve, reject) => {
     cloudinary.uploader.upload(
       imageUrl,
-      {
-        folder,
-        quality: 'auto:good',
-        fetch_format: 'auto',
-      },
+      { folder, quality: 'auto:good', fetch_format: 'auto' },
       (error, result) => {
-        if (error || !result) {
-          reject(error || new Error('Cloudinary returned no result'));
-        } else {
-          resolve(result.secure_url);
-        }
+        if (error || !result) reject(error || new Error('No result'));
+        else resolve(result.secure_url);
       }
     );
   });
 }
 
-/**
- * Downloads an image buffer and streams it to Cloudinary.
- */
-async function uploadBufferToCloudinary(
-  buffer: Buffer,
-  folder = 'portfolio_projects'
-): Promise<string> {
+async function uploadBufferToCloudinary(buffer: Buffer, folder = 'portfolio_projects'): Promise<string> {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       { folder, format: 'webp', quality: 'auto:good' },
       (error, result) => {
-        if (error || !result) {
-          reject(error || new Error('Cloudinary stream upload returned no result'));
-        } else {
-          resolve(result.secure_url);
-        }
+        if (error || !result) reject(error || new Error('No result'));
+        else resolve(result.secure_url);
       }
     );
     stream.end(buffer);
@@ -57,125 +33,89 @@ async function uploadBufferToCloudinary(
 }
 
 /**
- * Gets a screenshot for a URL and persists it in Cloudinary.
+ * Captures a screenshot and uploads to Cloudinary.
+ * Optimised for speed to fit within Vercel's 10s free-plan serverless limit.
  *
- * Strategy chain (production-safe, no Playwright required):
- *  1. thum.io  → download buffer → upload to Cloudinary
- *  2. microlink.io screenshot API → get image URL → upload to Cloudinary
- *  3. GitHub OpenGraph image → upload to Cloudinary
- *  4. Return raw GitHub OG URL as absolute last resort (no Cloudinary)
+ * Strategy order (fastest first):
+ *  1. thum.io      — ~2-3s, no API key needed, direct buffer upload
+ *  2. microlink.io — ~4-6s, returns hosted URL, upload to Cloudinary
+ *  3. GitHub OG    — instant fallback for any GitHub repo URL
  */
 export async function captureScreenshot(url: string): Promise<string> {
-  if (!url) {
-    console.warn('[Screenshot] No URL provided.');
-    return '';
-  }
+  if (!url) return '';
 
   const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
-  console.log(`[Screenshot] Starting capture for: ${url}`);
+  console.log(`[Screenshot] Capturing: ${url}`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STRATEGY 1: microlink.io
-  // Free tier (100 req/day). Crucially, it waits for the page to be fully
-  // loaded (networkidle2) before snapping — perfect for SPAs and lazy-loaded
-  // content. No paid plan needed for the wait behaviour.
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ── STRATEGY 1: thum.io ────────────────────────────────────────────────────
+  // Fast (2-3s), no API key, works in all environments.
+  // maxAge/0 forces a fresh capture every time (bypasses cache).
   if (!isLocalhost) {
     try {
-      // force=true bypasses microlink.io's cache so it always takes a FRESH screenshot
-      // waitUntil=networkidle2 waits for network to settle
-      // waitFor=5000 adds 5 extra seconds for GSAP/CSS animations to fully play
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2&waitFor=5000&force=true`;
-      console.log(`[Screenshot] Strategy 1 — microlink.io (networkidle2): ${microlinkApi}`);
+      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/maxAge/0/${url}`;
+      console.log(`[Screenshot] Trying thum.io...`);
 
-      const res = await fetch(microlinkApi, {
-        signal: AbortSignal.timeout(35000),
+      const res = await fetch(thumUrl, {
+        signal: AbortSignal.timeout(7000), // tight 7s budget
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' },
       });
+
+      if (res.ok) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length > 5000) {
+          const cloudUrl = await uploadBufferToCloudinary(buffer);
+          console.log(`[Screenshot] ✓ thum.io → Cloudinary: ${cloudUrl}`);
+          return cloudUrl;
+        }
+        console.warn(`[Screenshot] thum.io buffer too small (${buffer.length}B)`);
+      } else {
+        console.warn(`[Screenshot] thum.io HTTP ${res.status}`);
+      }
+    } catch (e: any) {
+      console.warn('[Screenshot] thum.io failed:', e.message);
+    }
+  }
+
+  // ── STRATEGY 2: microlink.io ───────────────────────────────────────────────
+  // Slightly slower but more reliable for SPAs.
+  // No waitFor delay here — we need speed to stay within 10s Vercel limit.
+  if (!isLocalhost) {
+    try {
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle0&force=true`;
+      console.log(`[Screenshot] Trying microlink.io...`);
+
+      const res = await fetch(microlinkApi, { signal: AbortSignal.timeout(8000) });
 
       if (res.ok) {
         const data = await res.json() as any;
         const screenshotUrl: string | undefined = data?.data?.screenshot?.url;
-        console.log(`[Screenshot] microlink.io status: ${data?.status}, screenshot: ${screenshotUrl}`);
-
         if (screenshotUrl) {
-          try {
-            const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
-            console.log(`[Screenshot] ✓ Strategy 1 (microlink.io) succeeded: ${cloudUrl}`);
-            return cloudUrl;
-          } catch (uploadErr) {
-            console.warn('[Screenshot] microlink.io Cloudinary upload failed:', uploadErr);
-          }
-        } else {
-          console.warn('[Screenshot] microlink.io returned no screenshot URL. Status:', data?.status);
+          const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
+          console.log(`[Screenshot] ✓ microlink.io → Cloudinary: ${cloudUrl}`);
+          return cloudUrl;
         }
+        console.warn('[Screenshot] microlink.io: no screenshot URL in response');
       } else {
-        console.warn(`[Screenshot] microlink.io HTTP ${res.status}.`);
+        console.warn(`[Screenshot] microlink.io HTTP ${res.status}`);
       }
     } catch (e: any) {
-      console.warn('[Screenshot] Strategy 1 (microlink.io) error:', e.message || e);
+      console.warn('[Screenshot] microlink.io failed:', e.message);
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STRATEGY 2: thum.io (no delay — free plan only supports instant capture)
-  // Used as a fast fallback when microlink.io fails.
-  // ─────────────────────────────────────────────────────────────────────────────
-  if (!isLocalhost) {
-    try {
-      // maxAge/0/ forces thum.io to always take a fresh screenshot (bypass cache)
-      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/maxAge/0/${url}`;
-      console.log(`[Screenshot] Strategy 2 — thum.io: ${thumUrl}`);
-
-      const res = await fetch(thumUrl, {
-        signal: AbortSignal.timeout(25000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-        },
-      });
-
-      console.log(`[Screenshot] thum.io responded: ${res.status} ${res.headers.get('content-type')}`);
-
-      if (res.ok) {
-        const buffer = Buffer.from(await res.arrayBuffer());
-        console.log(`[Screenshot] thum.io buffer size: ${buffer.length} bytes`);
-
-        if (buffer.length > 5000) {
-          try {
-            const cloudUrl = await uploadBufferToCloudinary(buffer);
-            console.log(`[Screenshot] ✓ Strategy 2 (thum.io) succeeded: ${cloudUrl}`);
-            return cloudUrl;
-          } catch (uploadErr) {
-            console.warn('[Screenshot] thum.io Cloudinary upload failed:', uploadErr);
-          }
-        } else {
-          console.warn(`[Screenshot] thum.io buffer too small (${buffer.length}B), skipping.`);
-        }
-      } else {
-        console.warn(`[Screenshot] thum.io HTTP ${res.status}.`);
-      }
-    } catch (e: any) {
-      console.warn('[Screenshot] Strategy 2 (thum.io) error:', e.message || e);
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STRATEGY 3: GitHub OpenGraph social preview image → upload to Cloudinary
-  // Works for any GitHub URL (repo, profile, etc.)
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ── STRATEGY 3: GitHub OpenGraph ──────────────────────────────────────────
+  // Guaranteed fallback — always works for GitHub URLs.
   const githubMatch = url.match(/github\.com\/([^/?#\s]+\/[^/?#\s]+)/);
   if (githubMatch) {
     const repoPath = githubMatch[1].replace(/\.git$/, '');
     const ogUrl = `https://opengraph.githubassets.com/1/${repoPath}`;
-    console.log(`[Screenshot] Strategy 3 — GitHub OG image: ${ogUrl}`);
-
+    console.log(`[Screenshot] Falling back to GitHub OG: ${ogUrl}`);
     try {
       const cloudUrl = await uploadRemoteUrlToCloudinary(ogUrl);
-      console.log(`[Screenshot] ✓ Strategy 3 (GitHub OG) succeeded: ${cloudUrl}`);
+      console.log(`[Screenshot] ✓ GitHub OG → Cloudinary: ${cloudUrl}`);
       return cloudUrl;
-    } catch (uploadErr) {
-      console.warn('[Screenshot] GitHub OG upload to Cloudinary failed, returning raw URL:', uploadErr);
-      // Return raw URL so the project still shows an image
-      return ogUrl;
+    } catch {
+      return ogUrl; // Return raw URL as absolute last resort
     }
   }
 
