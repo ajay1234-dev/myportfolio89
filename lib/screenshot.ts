@@ -75,20 +75,57 @@ export async function captureScreenshot(url: string): Promise<string> {
   console.log(`[Screenshot] Starting capture for: ${url}`);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // STRATEGY 1: thum.io
-  // Free, no API key, works in all server environments.
-  // IMPORTANT: Do NOT encode the URL — thum.io expects it raw at the end of the path.
-  // delay/5000 tells thum.io to wait 5 seconds after page load before snapping,
-  // so animated/lazy-loaded content has time to appear.
+  // STRATEGY 1: microlink.io
+  // Free tier (100 req/day). Crucially, it waits for the page to be fully
+  // loaded (networkidle2) before snapping — perfect for SPAs and lazy-loaded
+  // content. No paid plan needed for the wait behaviour.
   // ─────────────────────────────────────────────────────────────────────────────
   if (!isLocalhost) {
     try {
-      // delay/5000 = wait 5 seconds after page loads, then capture
-      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/delay/5000/${url}`;
-      console.log(`[Screenshot] Strategy 1 — thum.io (with 5s delay): ${thumUrl}`);
+      // waitUntil=networkidle2 means it waits until network is idle (no requests for 500ms)
+      // This naturally waits 4-5 seconds for SPAs to fully render
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2`;
+      console.log(`[Screenshot] Strategy 1 — microlink.io (networkidle2): ${microlinkApi}`);
+
+      const res = await fetch(microlinkApi, {
+        signal: AbortSignal.timeout(35000),
+      });
+
+      if (res.ok) {
+        const data = await res.json() as any;
+        const screenshotUrl: string | undefined = data?.data?.screenshot?.url;
+        console.log(`[Screenshot] microlink.io status: ${data?.status}, screenshot: ${screenshotUrl}`);
+
+        if (screenshotUrl) {
+          try {
+            const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
+            console.log(`[Screenshot] ✓ Strategy 1 (microlink.io) succeeded: ${cloudUrl}`);
+            return cloudUrl;
+          } catch (uploadErr) {
+            console.warn('[Screenshot] microlink.io Cloudinary upload failed:', uploadErr);
+          }
+        } else {
+          console.warn('[Screenshot] microlink.io returned no screenshot URL. Status:', data?.status);
+        }
+      } else {
+        console.warn(`[Screenshot] microlink.io HTTP ${res.status}.`);
+      }
+    } catch (e: any) {
+      console.warn('[Screenshot] Strategy 1 (microlink.io) error:', e.message || e);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STRATEGY 2: thum.io (no delay — free plan only supports instant capture)
+  // Used as a fast fallback when microlink.io fails.
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (!isLocalhost) {
+    try {
+      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/${url}`;
+      console.log(`[Screenshot] Strategy 2 — thum.io: ${thumUrl}`);
 
       const res = await fetch(thumUrl, {
-        signal: AbortSignal.timeout(40000), // 40s to account for 5s page delay + download
+        signal: AbortSignal.timeout(25000),
         headers: {
           'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
         },
@@ -100,61 +137,22 @@ export async function captureScreenshot(url: string): Promise<string> {
         const buffer = Buffer.from(await res.arrayBuffer());
         console.log(`[Screenshot] thum.io buffer size: ${buffer.length} bytes`);
 
-        // A valid screenshot image is always larger than 5KB
         if (buffer.length > 5000) {
           try {
             const cloudUrl = await uploadBufferToCloudinary(buffer);
-            console.log(`[Screenshot] ✓ Strategy 1 (thum.io) succeeded: ${cloudUrl}`);
+            console.log(`[Screenshot] ✓ Strategy 2 (thum.io) succeeded: ${cloudUrl}`);
             return cloudUrl;
           } catch (uploadErr) {
-            console.warn('[Screenshot] thum.io buffer upload to Cloudinary failed:', uploadErr);
+            console.warn('[Screenshot] thum.io Cloudinary upload failed:', uploadErr);
           }
         } else {
-          console.warn(`[Screenshot] thum.io returned too-small buffer (${buffer.length}B). Likely an error page.`);
+          console.warn(`[Screenshot] thum.io buffer too small (${buffer.length}B), skipping.`);
         }
       } else {
         console.warn(`[Screenshot] thum.io HTTP ${res.status}.`);
       }
     } catch (e: any) {
-      console.warn('[Screenshot] Strategy 1 (thum.io) error:', e.message || e);
-    }
-  } else {
-    console.log('[Screenshot] Skipping thum.io — URL is localhost.');
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STRATEGY 2: microlink.io screenshot API
-  // Free tier (100 requests/day), returns a hosted image URL we can upload.
-  // ─────────────────────────────────────────────────────────────────────────────
-  if (!isLocalhost) {
-    try {
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url`;
-      console.log(`[Screenshot] Strategy 2 — microlink.io: ${microlinkApi}`);
-
-      const res = await fetch(microlinkApi, {
-        signal: AbortSignal.timeout(20000),
-        headers: { 'x-api-key': '' }, // Works without key on free tier
-      });
-
-      if (res.ok) {
-        const data = await res.json() as any;
-        const screenshotUrl = data?.data?.screenshot?.url;
-        console.log(`[Screenshot] microlink.io status: ${data?.status}, screenshot URL: ${screenshotUrl}`);
-
-        if (screenshotUrl) {
-          try {
-            const cloudUrl = await uploadRemoteUrlToCloudinary(screenshotUrl);
-            console.log(`[Screenshot] ✓ Strategy 2 (microlink.io) succeeded: ${cloudUrl}`);
-            return cloudUrl;
-          } catch (uploadErr) {
-            console.warn('[Screenshot] microlink.io URL upload to Cloudinary failed:', uploadErr);
-          }
-        }
-      } else {
-        console.warn(`[Screenshot] microlink.io HTTP ${res.status}.`);
-      }
-    } catch (e: any) {
-      console.warn('[Screenshot] Strategy 2 (microlink.io) error:', e.message || e);
+      console.warn('[Screenshot] Strategy 2 (thum.io) error:', e.message || e);
     }
   }
 
