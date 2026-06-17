@@ -78,15 +78,17 @@ export async function captureScreenshot(url: string): Promise<string> {
   // STRATEGY 1: thum.io
   // Free, no API key, works in all server environments.
   // IMPORTANT: Do NOT encode the URL — thum.io expects it raw at the end of the path.
+  // delay/5000 tells thum.io to wait 5 seconds after page load before snapping,
+  // so animated/lazy-loaded content has time to appear.
   // ─────────────────────────────────────────────────────────────────────────────
   if (!isLocalhost) {
     try {
-      // Correct format: just append the raw URL directly after the options
-      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/${url}`;
-      console.log(`[Screenshot] Strategy 1 — thum.io: ${thumUrl}`);
+      // delay/5000 = wait 5 seconds after page loads, then capture
+      const thumUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/delay/5000/${url}`;
+      console.log(`[Screenshot] Strategy 1 — thum.io (with 5s delay): ${thumUrl}`);
 
       const res = await fetch(thumUrl, {
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(40000), // 40s to account for 5s page delay + download
         headers: {
           'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
         },
