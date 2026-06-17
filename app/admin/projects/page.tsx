@@ -37,6 +37,7 @@ export default function ProjectsPage() {
   const [actionMsg, setActionMsg] = useState("");
 
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Project>>({});
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
   const [uploadingRow, setUploadingRow] = useState<string | null>(null);
   const [uploadingModal, setUploadingModal] = useState(false);
