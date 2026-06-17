@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useState } from 'react';
-import { projects as staticProjects } from '@/data/projects';
 import ProjectMockup from '@/components/ProjectMockup';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -133,11 +132,7 @@ export default function ProjectsSection() {
       : [{ value: "NEW", label: "AUTO SYNCED" }],
   }));
 
-  // Merge dynamic and static projects into one flat list
-  const allProjects = [...liveMergedProjects, ...staticProjects.map((sp, i) => ({
-    ...sp,
-    id: String(liveMergedProjects.length + i + 1).padStart(2, '0')
-  }))];
+  const allProjects = liveMergedProjects;
 
   return (
     <section id="projects" data-section-name="03 — PROJECTS" style={{ background: '#060608', position: 'relative', paddingBottom: '120px' }}>
