@@ -37,11 +37,13 @@ export default function ProjectsPage() {
   const [actionMsg, setActionMsg] = useState("");
 
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Project>>({});
-  
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
-  const [capturingScreenshot, setCapturingScreenshot] = useState(false);
-  const [capturingRow, setCapturingRow] = useState<string | null>(null);
+  const [uploadingRow, setUploadingRow] = useState<string | null>(null);
+  const [uploadingModal, setUploadingModal] = useState(false);
+  const [targetUploadProject, setTargetUploadProject] = useState<Project | null>(null);
+  
+  const fileInputRefRow = useRef<HTMLInputElement>(null);
+  const fileInputRefModal = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
@@ -182,72 +184,49 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleCaptureScreenshot = async () => {
-    if (!editForm.liveUrl) {
-      alert("Please enter a Live URL first.");
-      return;
-    }
+  const handleFileUpload = async (file: File, projectId?: string) => {
     try {
-      setCapturingScreenshot(true);
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const res = await fetch("/api/screenshot", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: editForm.liveUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to capture");
-      setEditForm(prev => ({ ...prev, imageUrl: data.imageUrl }));
-    } catch (err: any) {
-      alert(`✕ ${err.message}`);
-    } finally {
-      setCapturingScreenshot(false);
-    }
-  };
-
-  const handleCaptureScreenshotRow = async (project: Project) => {
-    const targetUrl = project.liveUrl || project.githubUrl;
-    if (!targetUrl) {
-      alert("No URL available to capture.");
-      return;
-    }
-    try {
-      setCapturingRow(project.id);
-      setActionMsg(`Capturing screenshot for "${project.title}"... (Takes ~10-15s)`);
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const res = await fetch("/api/screenshot", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: targetUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to capture");
+      if (projectId) setUploadingRow(projectId);
+      else setUploadingModal(true);
       
-      // Save directly to Firestore
-      await fetch("/api/projects", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ id: project.id, imageUrl: data.imageUrl }),
-      });
+      setActionMsg(`Uploading image ${file.name}...`);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Not authenticated");
 
-      setActionMsg(`✓ Screenshot captured and saved for "${project.title}"!`);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to upload");
+
+      if (projectId) {
+        // Save to Firestore
+        await fetch("/api/projects", {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ id: projectId, imageUrl: data.imageUrl }),
+        });
+        setActionMsg(`✓ Image uploaded and saved!`);
+      } else {
+        // Just update the modal edit form
+        setEditForm(prev => ({ ...prev, imageUrl: data.imageUrl }));
+        setActionMsg(`✓ Image uploaded!`);
+      }
     } catch (err: any) {
       setActionMsg(`✕ ${err.message}`);
     } finally {
-      setCapturingRow(null);
+      if (projectId) setUploadingRow(null);
+      else setUploadingModal(false);
     }
   };
 
@@ -264,6 +243,20 @@ export default function ProjectsPage() {
 
   return (
     <div>
+      {/* Hidden file input for row uploads */}
+      <input 
+        type="file" 
+        ref={fileInputRefRow} 
+        style={{ display: "none" }} 
+        accept="image/*"
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0] && targetUploadProject) {
+            handleFileUpload(e.target.files[0], targetUploadProject.id);
+          }
+          e.target.value = ''; // reset
+        }}
+      />
+
       {/* Header */}
       <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
         <div>
@@ -428,13 +421,13 @@ export default function ProjectsPage() {
                   <>
                     <button
                       onClick={() => handleGenerateAndPublish(project)}
-                      disabled={generating === project.id || capturingRow === project.id}
+                      disabled={generating === project.id || uploadingRow === project.id}
                       style={{
                         padding: "7px 14px", borderRadius: "8px", border: "none",
                         background: generating === project.id ? "rgba(242,244,255,0.08)" : "linear-gradient(135deg, #5B6EFF, #7B8FFF)",
                         color: "#fff", fontSize: "11px", fontWeight: 700,
-                        fontFamily: "var(--font-dm)", cursor: (generating === project.id || capturingRow === project.id) ? "not-allowed" : "pointer",
-                        opacity: (generating === project.id || capturingRow === project.id) ? 0.6 : 1,
+                        fontFamily: "var(--font-dm)", cursor: (generating === project.id || uploadingRow === project.id) ? "not-allowed" : "pointer",
+                        opacity: (generating === project.id || uploadingRow === project.id) ? 0.6 : 1,
                         boxShadow: generating === project.id ? "none" : "0 0 16px rgba(91,110,255,0.3)",
                         display: "flex", alignItems: "center", gap: "6px",
                       }}
@@ -447,18 +440,21 @@ export default function ProjectsPage() {
                     </button>
                     
                     <button
-                      onClick={() => handleCaptureScreenshotRow(project)}
-                      disabled={capturingRow === project.id || generating === project.id}
+                      onClick={() => {
+                        setTargetUploadProject(project);
+                        fileInputRefRow.current?.click();
+                      }}
+                      disabled={uploadingRow === project.id || generating === project.id}
                       style={{
                         padding: "7px 14px", borderRadius: "8px", border: "1px solid rgba(0,229,160,0.4)",
-                        background: capturingRow === project.id ? "rgba(0,229,160,0.05)" : "rgba(0,229,160,0.1)",
+                        background: uploadingRow === project.id ? "rgba(0,229,160,0.05)" : "rgba(0,229,160,0.1)",
                         color: "#00E5A0", fontSize: "11px", fontWeight: 700,
-                        fontFamily: "var(--font-dm)", cursor: (capturingRow === project.id || generating === project.id) ? "not-allowed" : "pointer",
-                        opacity: (capturingRow === project.id || generating === project.id) ? 0.6 : 1,
+                        fontFamily: "var(--font-dm)", cursor: (uploadingRow === project.id || generating === project.id) ? "not-allowed" : "pointer",
+                        opacity: (uploadingRow === project.id || generating === project.id) ? 0.6 : 1,
                         display: "flex", alignItems: "center", gap: "6px",
                       }}
                     >
-                      {capturingRow === project.id ? "Capturing..." : "📷 Capture Screenshot"}
+                      {uploadingRow === project.id ? "Uploading..." : "📤 Upload Image"}
                     </button>
                   </>
                 )}
@@ -469,15 +465,18 @@ export default function ProjectsPage() {
                       ✓ Review & Publish
                     </button>
                     <button
-                      onClick={() => handleCaptureScreenshotRow(project)}
-                      disabled={capturingRow === project.id}
+                      onClick={() => {
+                        setTargetUploadProject(project);
+                        fileInputRefRow.current?.click();
+                      }}
+                      disabled={uploadingRow === project.id}
                       style={{
                         padding: "7px 14px", borderRadius: "8px", border: "none",
                         background: "rgba(91,110,255,0.1)", color: "#7B8FFF", fontSize: "11px", fontWeight: 700, fontFamily: "var(--font-dm)", 
-                        cursor: capturingRow === project.id ? "not-allowed" : "pointer", opacity: capturingRow === project.id ? 0.6 : 1
+                        cursor: uploadingRow === project.id ? "not-allowed" : "pointer", opacity: uploadingRow === project.id ? 0.6 : 1
                       }}
                     >
-                      {capturingRow === project.id ? "Capturing..." : "📷 Retake Screenshot"}
+                      {uploadingRow === project.id ? "Uploading..." : "📤 Upload Image"}
                     </button>
                     <button onClick={() => handleStatusChange(project.id, "rejected")} style={{ padding: "7px 14px", borderRadius: "8px", border: "none", background: "rgba(255,77,109,0.1)", color: "#FF4D6D", fontSize: "11px", fontWeight: 700, fontFamily: "var(--font-dm)", cursor: "pointer" }}>
                       ✕ Reject
@@ -578,20 +577,32 @@ export default function ProjectsPage() {
 
               <div>
                 <label style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "rgba(242,244,255,0.4)", marginBottom: "6px", fontFamily: "var(--font-mono)" }}>
-                  <span>Image URL (Screenshot)</span>
+                  <span>Image URL</span>
                   <button 
-                    onClick={handleCaptureScreenshot} 
-                    disabled={capturingScreenshot}
-                    style={{ background: "none", border: "none", color: "#00E5A0", cursor: capturingScreenshot ? "wait" : "pointer", fontSize: "11px", fontFamily: "var(--font-mono)", padding: 0 }}
+                    onClick={() => fileInputRefModal.current?.click()} 
+                    disabled={uploadingModal}
+                    style={{ background: "none", border: "none", color: "#00E5A0", cursor: uploadingModal ? "wait" : "pointer", fontSize: "11px", fontFamily: "var(--font-mono)", padding: 0 }}
                   >
-                    {capturingScreenshot ? "Capturing..." : "📷 Capture from Live URL"}
+                    {uploadingModal ? "Uploading..." : "📤 Upload File instead"}
                   </button>
                 </label>
                 <input 
                   type="text" value={editForm.imageUrl || ""} 
                   onChange={e => setEditForm({ ...editForm, imageUrl: e.target.value })}
                   style={{ width: "100%", padding: "10px 12px", background: "rgba(242,244,255,0.03)", border: "1px solid rgba(242,244,255,0.1)", borderRadius: "8px", color: "#F2F4FF", fontFamily: "var(--font-dm)", outline: "none" }}
-                  placeholder="https://..."
+                  placeholder="https://... or click Upload"
+                />
+                <input 
+                  type="file" 
+                  ref={fileInputRefModal} 
+                  style={{ display: "none" }} 
+                  accept="image/*"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleFileUpload(e.target.files[0]);
+                    }
+                    e.target.value = '';
+                  }}
                 />
               </div>
 

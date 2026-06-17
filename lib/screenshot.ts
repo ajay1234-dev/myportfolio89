@@ -19,7 +19,7 @@ async function uploadRemoteUrlToCloudinary(imageUrl: string, folder = 'portfolio
   });
 }
 
-async function uploadBufferToCloudinary(buffer: Buffer, folder = 'portfolio_projects'): Promise<string> {
+export async function uploadBufferToCloudinary(buffer: Buffer, folder = 'portfolio_projects'): Promise<string> {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       { folder, format: 'webp', quality: 'auto:good' },
