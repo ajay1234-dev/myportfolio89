@@ -82,9 +82,10 @@ export async function captureScreenshot(url: string): Promise<string> {
   // ─────────────────────────────────────────────────────────────────────────────
   if (!isLocalhost) {
     try {
-      // waitUntil=networkidle2 means it waits until network is idle (no requests for 500ms)
-      // This naturally waits 4-5 seconds for SPAs to fully render
-      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2`;
+      // waitUntil=networkidle2 waits for no network requests for 500ms
+      // waitFor=5000 adds an EXTRA 5 second delay on top, so GSAP/CSS animations
+      // and canvas-based content have fully rendered before the screenshot is taken
+      const microlinkApi = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitUntil=networkidle2&waitFor=5000`;
       console.log(`[Screenshot] Strategy 1 — microlink.io (networkidle2): ${microlinkApi}`);
 
       const res = await fetch(microlinkApi, {
