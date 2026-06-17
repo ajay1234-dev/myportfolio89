@@ -38,6 +38,9 @@ export default function ProjectsPage() {
 
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editForm, setEditForm] = useState<Partial<Project>>({});
+  
+  const [isCreatingCustom, setIsCreatingCustom] = useState(false);
+  const [capturingScreenshot, setCapturingScreenshot] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
@@ -127,6 +130,7 @@ export default function ProjectsPage() {
 
   const closeEditModal = () => {
     setEditingProject(null);
+    setIsCreatingCustom(false);
     setEditForm({});
   };
 
@@ -136,27 +140,72 @@ export default function ProjectsPage() {
       const token = await auth.currentUser?.getIdToken();
       if (!token) throw new Error("Not authenticated");
 
-      const payload = {
-        ...editForm,
-        id: editingProject!.id,
-        status: publish ? "approved" : editingProject!.status,
-      };
+      if (isCreatingCustom) {
+        // Create new project
+        const payload = {
+          ...editForm,
+          status: publish ? "approved" : "pending",
+        };
+        const res = await fetch("/api/projects", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Failed to create project");
+        setActionMsg(publish ? `✓ Custom project published live!` : `✓ Custom project saved as pending.`);
+      } else {
+        // Update existing project
+        const payload = {
+          ...editForm,
+          id: editingProject!.id,
+          status: publish ? "approved" : editingProject!.status,
+        };
+        const res = await fetch("/api/projects", {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Failed to save changes");
+        setActionMsg(publish ? `✓ Project published to live portfolio!` : `✓ Draft saved successfully.`);
+      }
+      
+      closeEditModal();
+    } catch (err: any) {
+      setActionMsg(`✕ ${err.message}`);
+    }
+  };
 
-      const res = await fetch("/api/projects", {
-        method: "PATCH",
+  const handleCaptureScreenshot = async () => {
+    if (!editForm.liveUrl) {
+      alert("Please enter a Live URL first.");
+      return;
+    }
+    try {
+      setCapturingScreenshot(true);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch("/api/screenshot", {
+        method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ url: editForm.liveUrl }),
       });
-
-      if (!res.ok) throw new Error("Failed to save changes");
-      
-      setActionMsg(publish ? `✓ Project published to live portfolio!` : `✓ Draft saved successfully.`);
-      closeEditModal();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to capture");
+      setEditForm(prev => ({ ...prev, imageUrl: data.imageUrl }));
     } catch (err: any) {
-      setActionMsg(`✕ ${err.message}`);
+      alert(`✕ ${err.message}`);
+    } finally {
+      setCapturingScreenshot(false);
     }
   };
 
@@ -174,13 +223,21 @@ export default function ProjectsPage() {
   return (
     <div>
       {/* Header */}
-      <div style={{ marginBottom: "24px" }}>
-        <h2 style={{ fontFamily: "var(--font-syne)", fontSize: "24px", fontWeight: 800, color: "var(--white)", marginBottom: "8px" }}>
-          Projects
-        </h2>
-        <p style={{ color: "rgba(242,244,255,0.35)", fontSize: "13px" }}>
-          Manage your GitHub repositories. Generate AI content and publish to your portfolio.
-        </p>
+      <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <h2 style={{ fontFamily: "var(--font-syne)", fontSize: "24px", fontWeight: 800, color: "var(--white)", marginBottom: "8px" }}>
+            Projects
+          </h2>
+          <p style={{ color: "rgba(242,244,255,0.35)", fontSize: "13px" }}>
+            Manage your GitHub repositories. Generate AI content and publish to your portfolio.
+          </p>
+        </div>
+        <button 
+          onClick={() => { setIsCreatingCustom(true); setEditForm({}); }}
+          style={{ padding: "10px 16px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #5B6EFF, #7B8FFF)", color: "#fff", fontSize: "13px", fontWeight: 700, fontFamily: "var(--font-dm)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          + Custom Project
+        </button>
       </div>
 
       {/* Tabs */}
@@ -385,7 +442,7 @@ export default function ProjectsPage() {
       )}
 
       {/* EDIT MODAL OVERLAY */}
-      {editingProject && (
+      {(editingProject || isCreatingCustom) && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
           background: "rgba(6,6,8,0.8)", backdropFilter: "blur(8px)", padding: "24px"
@@ -396,7 +453,7 @@ export default function ProjectsPage() {
           }}>
             <div style={{ padding: "20px 24px", borderBottom: "1px solid rgba(242,244,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, fontFamily: "var(--font-syne)", fontSize: "18px", color: "#F2F4FF" }}>
-                Review Project: {editingProject.title}
+                {isCreatingCustom ? "Create Custom Project" : `Review Project: ${editingProject?.title}`}
               </h3>
               <button onClick={closeEditModal} style={{ background: "none", border: "none", color: "rgba(242,244,255,0.4)", cursor: "pointer", fontSize: "20px" }}>×</button>
             </div>
@@ -450,11 +507,21 @@ export default function ProjectsPage() {
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "11px", color: "rgba(242,244,255,0.4)", marginBottom: "6px", fontFamily: "var(--font-mono)" }}>Image URL (Screenshot)</label>
+                <label style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "rgba(242,244,255,0.4)", marginBottom: "6px", fontFamily: "var(--font-mono)" }}>
+                  <span>Image URL (Screenshot)</span>
+                  <button 
+                    onClick={handleCaptureScreenshot} 
+                    disabled={capturingScreenshot}
+                    style={{ background: "none", border: "none", color: "#00E5A0", cursor: capturingScreenshot ? "wait" : "pointer", fontSize: "11px", fontFamily: "var(--font-mono)", padding: 0 }}
+                  >
+                    {capturingScreenshot ? "Capturing..." : "📷 Capture from Live URL"}
+                  </button>
+                </label>
                 <input 
                   type="text" value={editForm.imageUrl || ""} 
                   onChange={e => setEditForm({ ...editForm, imageUrl: e.target.value })}
                   style={{ width: "100%", padding: "10px 12px", background: "rgba(242,244,255,0.03)", border: "1px solid rgba(242,244,255,0.1)", borderRadius: "8px", color: "#F2F4FF", fontFamily: "var(--font-dm)", outline: "none" }}
+                  placeholder="https://..."
                 />
               </div>
 

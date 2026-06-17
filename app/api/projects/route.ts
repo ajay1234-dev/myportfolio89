@@ -61,6 +61,38 @@ export async function PATCH(req: Request) {
   }
 }
 
+// POST /api/projects — create a new project (admin only)
+export async function POST(req: Request) {
+  const isAdmin = verifyAdmin(req);
+  if (!isAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  try {
+    const body = await req.json();
+    
+    const newProject = {
+      title: body.title || 'Untitled Project',
+      description: body.description || '',
+      tagline: body.tagline || '',
+      techStack: Array.isArray(body.techStack) ? body.techStack : (body.techStack || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+      features: Array.isArray(body.features) ? body.features : (body.features || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+      githubUrl: body.githubUrl || '',
+      liveUrl: body.liveUrl || '',
+      imageUrl: body.imageUrl || '',
+      status: body.status || 'approved', // Default to live
+      featured: !!body.featured,
+      isCustom: true, // Identify as a custom manually created project
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const docRef = await adminDb.collection('projects').add(newProject);
+    return NextResponse.json({ success: true, id: docRef.id });
+  } catch (error) {
+    console.error('POST /api/projects error:', error);
+    return NextResponse.json({ error: 'Failed to create project' }, { status: 500 });
+  }
+}
+
 // DELETE /api/projects — delete a project (admin only)
 export async function DELETE(req: Request) {
   const isAdmin = verifyAdmin(req);
